@@ -111,7 +111,7 @@ def safe_open(path, read=True, write=False, allow_create=True,
         sys.exit(1)
 
 
-def make_output_name(input_name, new_extension):
+def make_output_filename(input_name, new_extension):
     """
     Return an output filename based on an input filename; using basename and
     splitext
@@ -125,11 +125,15 @@ def main():
     or a bool type (where True indicates successful exection)
     """
     argp = argparse.ArgumentParser(description=(
-        "Convert a json file into a csv file"))
-    argp.add_argument('inputfiles', nargs="+", help=(
-        "Input JSON file(s) (must be an array of objects with uniform keys)"))
+        "Create a CVS file from a JSON file. The input files must contain an "
+        "array of objects with uniform keys. Output will be written to the "
+        "current working directory. For example for the input file "
+        "'/something/thing.json' we create './thing.csv'. By default "
+        "existing files will not be overwritten."))
+    argp.add_argument('inputfile', nargs="+", help=(
+        "Input JSON file(s) "))
     argp.add_argument('-w', '--overwrite', action="store_true", help=(
-        "Overwrite the output file if it exists"))
+        "Overwrite the output file(s) if they exist"))
     argp.add_argument('-d', '--debug', action="store_true", help=(
         "Print debugging output instead of generating CSV files"))
     args = argp.parse_args()
@@ -139,19 +143,19 @@ def main():
         import pprint
         dump = pprint.PrettyPrinter(indent=4).pprint
 
-    for input_name in args.inputfiles:
-        table = json_to_table(input_name)
+    for input_filename in args.inputfile:
+        table = json_to_table(input_filename)
         if args.debug:
             dump(table)
             continue
 
-        output_name = make_output_name(input_name, '.csv')
+        output_filename = make_output_filename(input_filename, '.csv')
 
-        with safe_open(output_name, write=True,
+        with safe_open(output_filename, write=True,
                        allow_overwrite=args.overwrite) as output:
             writer = UnicodeWriter(output, quoting=csv.QUOTE_MINIMAL)
             writer.writerows(table)
-        print "Wrote {} records to {}".format(len(table), output_name)
+        print "Wrote {} records to {}".format(len(table), output_filename)
 
     return True
 
