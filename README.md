@@ -24,7 +24,7 @@ Do you have a JSON file, [like the staticsitegenerators.net list of static site 
   
 ## Support Information
 
-This program is provided without technical support. For more information see the project home page at <http://example.com/>
+This program is provided without technical support. For more information see the project home page at <https://github.com/glvnst/json2csv/>
 
 ## License
 
