@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-json2csv: Convert a json table into a csv file
+json2csv: Convert a json file into a csv file
 """
 import argparse
 import sys
@@ -11,54 +11,34 @@ import cStringIO
 import os
 import collections
 
-#import support_modules
 
-def not_none(input_value, none_replacement=""):
-    """ If the given input value is None, replace it with something better """
-    if input_value is None:
-        return none_replacement
-    return input_value
-
-
-def json_to_table(json_filename):
+class UnicodeWriter(object):
     """
-    Convert a list of dicts in to a table (list of lists of values). Return 
-    the headings in the result row
-    """
-    with codecs.open(json_filename, "r", "utf-8") as json_fh:
-        records = json.load(json_fh, encoding="utf-8",
-                            object_pairs_hook=collections.OrderedDict)
-    headings = records[0].keys()
-
-    return [headings] + [[not_none(record[heading]) for heading in headings]
-                         for record in records]
-
-
-class UnicodeWriter:
-    """
-    A CSV writer which will write rows to CSV file "f",
+    A CSV writer which will write rows to output filehandle "stream",
     which is encoded in the given encoding.
+    Mostly from https://docs.python.org/2/library/csv.html
     """
 
-    def __init__(self, f, dialect=csv.excel, encoding="utf-8", **kwds):
+    def __init__(self, stream, dialect=csv.excel, encoding="utf-8", **kwds):
         # Redirect output to a queue
         self.queue = cStringIO.StringIO()
         self.writer = csv.writer(self.queue, dialect=dialect, **kwds)
-        self.stream = f
+        self.stream = stream
         self.encoder = codecs.getincrementalencoder(encoding)()
 
-    def writerow(self, raw_row):
-        row_values = list()
-        for value in raw_row:
+    def writerow(self, raw_row_values):
+        """ Write a row to the output file (with hackery for unicode) """
+        safe_row_values = list()
+        for value in raw_row_values:
             try:
                 if isinstance(value, unicode):
-                    row_values.append(value.encode("utf-8"))
+                    safe_row_values.append(value.encode("utf-8"))
                     continue
-                row_values.append(value)
+                safe_row_values.append(value)
             except UnicodeDecodeError:
                 print "{}:{}".format(type(value).__name__, value)
                 raise
-        self.writer.writerow(row_values)
+        self.writer.writerow(safe_row_values)
         # Fetch UTF-8 output from the queue ...
         data = self.queue.getvalue()
         data = data.decode("utf-8")
@@ -70,8 +50,66 @@ class UnicodeWriter:
         self.queue.truncate(0)
 
     def writerows(self, rows):
+        """ Calls writerow on a collection of rows """
         for row in rows:
             self.writerow(row)
+
+
+def not_none(input_value, replacement_value=""):
+    """ If the given input value is None, replace it with something else """
+    if input_value is None:
+        return replacement_value
+    return input_value
+
+
+def json_to_table(json_filename):
+    """
+    Convert a list of dicts into a table (list of lists of values). Return the
+    headings in the result row
+    """
+    with open(json_filename, "r") as json_fh:
+        records = json.load(json_fh, encoding="utf-8",
+                            object_pairs_hook=collections.OrderedDict)
+    headings = tuple(records[0].keys())
+
+    return [headings] + [[not_none(record[heading]) for heading in headings]
+                         for record in records]
+
+
+def safe_open(path, read=True, write=False, allow_create=True,
+              allow_overwrite=False, file_permissions=0755):
+    """ Uses os.open to avoid clobbering files that already exist """
+    flags = 0
+    mode = 'r'
+
+    if read and write:
+        flags |= os.O_RDWR
+        mode = 'r+'
+    elif read:
+        flags |= os.O_RDONLY
+        mode = 'r'
+    elif write:
+        flags |= os.O_WRONLY
+        mode = 'r+'
+        # This hurts me.
+        # 'w' and 'w+' truncate
+        # 'a' and 'a+' ONLY append (without regard to seek) on some platforms
+    else:
+        raise RuntimeError("a file must be opened for reading or writing")
+
+    if allow_create:
+        flags |= os.O_CREAT
+    if not allow_overwrite:
+        if not allow_create:
+            raise RuntimeError("safe_open must create or overwrite")
+        flags |= os.O_CREAT | os.O_EXCL
+
+    try:
+        return os.fdopen(os.open(path, flags, file_permissions), mode)
+    except OSError, error:
+        print error
+        sys.exit(1)
+
 
 def make_output_name(input_name, new_extension):
     """
@@ -87,11 +125,13 @@ def main():
     or a bool type (where True indicates successful exection)
     """
     argp = argparse.ArgumentParser(description=(
-        "Convert a json table into a csv file"))
+        "Convert a json file into a csv file"))
     argp.add_argument('inputfiles', nargs="+", help=(
-        "{{Description of input files}}"))
+        "Input JSON file(s) (must be an array of objects with uniform keys)"))
+    argp.add_argument('-w', '--overwrite', action="store_true", help=(
+        "Overwrite the output file if it exists"))
     argp.add_argument('-d', '--debug', action="store_true", help=(
-        "enable debugging output"))
+        "Print debugging output instead of generating CSV files"))
     args = argp.parse_args()
 
     # do things
@@ -106,7 +146,9 @@ def main():
             continue
 
         output_name = make_output_name(input_name, '.csv')
-        with open(output_name, "wb") as output:
+
+        with safe_open(output_name, write=True,
+                       allow_overwrite=args.overwrite) as output:
             writer = UnicodeWriter(output, quoting=csv.QUOTE_MINIMAL)
             writer.writerows(table)
         print "Wrote {} records to {}".format(len(table), output_name)
